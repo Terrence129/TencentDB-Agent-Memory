@@ -246,7 +246,7 @@ $DOCKER run -d --name "$CONTAINER" \
   --network-alias memory-core \
   -p "${MEMORY_CORE_PORT}:8420" \
   -v "${MEMORY_CORE_VOLUME}:/data/tdai-memory" \
-  -v "$CORE_CONFIG_FILE:/data/config/tdai-gateway.yaml:ro" \
+  -v "$(docker_mount_path "$CORE_CONFIG_FILE"):/data/config/tdai-gateway.yaml:ro" \
   -e TDAI_GATEWAY_PORT=8420 \
   -e TDAI_GATEWAY_HOST=0.0.0.0 \
   -e TDAI_GATEWAY_API_KEY="$MEMORY_CORE_GATEWAY_API_KEY" \
@@ -270,14 +270,18 @@ ok "memory-core 已启动 → http://localhost:${MEMORY_CORE_PORT}/"
 # base32url —— 每台机器/每次 purge 都是独立 key，不会撞车。
 
 generate_user_key() {
-  # sk-mem-<32 chars A-Za-z0-9>，与 metadata/utils/user-key.ts 的格式一致
-  # 用 openssl（可移植；tr 过滤 base64 里的 +/= 到 32 位）
-  local raw
+  # sk-mem-<32 chars A-Za-z0-9>，与 metadata/utils/user-key.ts 的格式一致。
+  # 注意：Git Bash 下 `set -o pipefail` + `... | head -c 32` 会因为上游收到
+  # SIGPIPE 让整个赋值返回非 0，脚本在 set -e 下直接退出；所以这里先取完整
+  # 输出再按 bash 子串截断，避免任何管道提前关闭。
+  local raw=""
   if command -v openssl >/dev/null 2>&1; then
-    raw=$(openssl rand -base64 48 | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32)
-  else
-    # 兜底：读足够多的 urandom 保证过滤后 >=32
-    raw=$(head -c 256 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32)
+    raw=$(openssl rand -base64 48 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9')
+    raw="${raw:0:32}"
+  fi
+  if [[ ${#raw} -lt 32 ]]; then
+    # 兜底：读足够多的 urandom，失败也不让 set -e 中断
+    raw=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 32 || true)
   fi
   echo "sk-mem-${raw}"
 }
@@ -285,7 +289,7 @@ generate_user_key() {
 verify_user_key() {
   local key="$1"
   local code
-  code=$(/usr/bin/curl -sS -o /dev/null -w "%{http_code}" --max-time 5 \
+  code=$("$CURL" -sS -o /dev/null -w "%{http_code}" --max-time 5 \
     -X POST -H "Content-Type: application/json" \
     -H "x-tdai-service-id: default" \
     "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
@@ -306,7 +310,7 @@ fi
 
 init_body=$(printf '{"username":"%s","user_key":"%s"}' \
   "$MEMORY_CORE_ADMIN_USERNAME" "$ADMIN_KEY")
-init_resp=$(/usr/bin/curl -sS -o /tmp/init-admin.$$ -w "%{http_code}" \
+init_resp=$("$CURL" -sS -o /tmp/init-admin.$$ -w "%{http_code}" \
   -X POST -H "Content-Type: application/json" \
   "${AUTH_HEADER[@]+"${AUTH_HEADER[@]}"}" \
   -H "x-tdai-service-id: default" \
@@ -332,7 +336,7 @@ case "$init_resp" in
     ;;
   *)
     warn "init-admin 返回 HTTP=${init_resp}，可能需要手动排查："
-    cat /tmp/init-admin.$$ 2>/dev/null; echo
+    cat /tmp/init-admin.$$ 2>/dev/null || true; echo
     ;;
 esac
 rm -f /tmp/init-admin.$$

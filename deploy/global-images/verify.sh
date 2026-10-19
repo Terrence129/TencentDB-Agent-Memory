@@ -37,7 +37,7 @@ done
 
 ERRORS=0
 WARNS=0
-CURL=/usr/bin/curl
+# CURL 由 _lib.sh 解析（/usr/bin/curl → PATH 中的 curl），兼容 Git Bash。
 
 # ─── LLM 通路检查函数 ───────────────────────────────────────────────
 # check_llm_openai <label> <base_url> <api_key> <model>

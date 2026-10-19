@@ -77,6 +77,20 @@ find_docker() {
 
 DOCKER="$(find_docker)"
 
+# ── Windows / Git Bash bind mount 路径转换 ───────────────────────────
+# docker.exe 是原生 Windows 程序，MSYS 会把以 "/" 开头的 POSIX 参数改写成
+# Windows 路径：`-v "$PWD/file:/data/config.yaml"` 里容器侧的目标路径会被
+# 变成 "C:/Program Files/Git/data/config.yaml"，挂载位置错位（容器里读不到
+# 配置，业务静默降级）。先把宿主侧转成 "D:/..." 的 Windows 形式，整个参数
+# 以盘符开头，MSYS 就不再改写容器侧路径。Linux / macOS 无 cygpath，原样返回。
+docker_mount_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 # PULL=1 时拉取镜像最新版本。
 # 默认关闭：docker run 在本地没有镜像时会自动拉，但本地已有同名 :latest 时会直接复用，
 # 不会感知远端更新——想升级到最新 latest 就带 PULL=1。
